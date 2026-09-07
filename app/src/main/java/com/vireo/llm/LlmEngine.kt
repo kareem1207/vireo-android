@@ -48,13 +48,21 @@ class LlmEngine {
             Log.i(TAG, "loaded $path")
         }
 
-    fun generate(messages: List<ChatMsg>, params: GenParams = GenParams()): Flow<GenEvent> = callbackFlow {
+    fun generate(
+        messages: List<ChatMsg>,
+        params: GenParams = GenParams(),
+        pacer: TokenPacer = NoPacer,
+    ): Flow<GenEvent> = callbackFlow {
         val h = handle
         require(h != 0L) { "no model loaded" }
         val roles = Array(messages.size) { messages[it].role }
         val contents = Array(messages.size) { messages[it].content }
         val cb = object : GenerationCallback {
-            override fun onToken(piece: String) { trySend(GenEvent.Token(piece)) }
+            override fun onToken(piece: String) {
+                // Runs on the native gen thread — blocking here throttles/pauses generation.
+                if (!pacer.beforeToken()) { NativeLlm.nativeCancel(h); return }
+                trySend(GenEvent.Token(piece))
+            }
             override fun onDone(tokPerSec: Float, nTokens: Int, promptEvalTokPerSec: Float) {
                 trySend(GenEvent.Done(tokPerSec, nTokens, promptEvalTokPerSec)); close()
             }

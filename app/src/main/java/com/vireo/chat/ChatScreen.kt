@@ -17,34 +17,36 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-
+import com.vireo.thermal.ThermalTier
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(vm: ChatViewModel) {
     val s by vm.state.collectAsState()
     var input by remember { mutableStateOf("") }
+    var menuOpen by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(s.messages.size, s.messages.lastOrNull()?.text) {
@@ -57,13 +59,37 @@ fun ChatScreen(vm: ChatViewModel) {
                 title = {
                     Column {
                         Text("Vireo", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "${s.modelName} · ${s.statusLine}",
-                            style = MaterialTheme.typography.labelSmall,
-                        )
+                        Text(subtitle(s), style = MaterialTheme.typography.labelSmall)
                     }
                 },
-                actions = { TextButton(onClick = vm::clear) { Text("Clear") } },
+                actions = {
+                    TextButton(onClick = vm::clear) { Text("Clear") }
+                    Box {
+                        TextButton(onClick = { menuOpen = true }) { Text("⋮") }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text(if (s.ecoMode) "Eco Mode: ON" else "Eco Mode: OFF") },
+                                onClick = { vm.setEcoMode(!s.ecoMode) },
+                            )
+                            HorizontalDivider()
+                            Text(
+                                "  Debug thermal",
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            )
+                            listOf<Pair<String, ThermalTier?>>(
+                                "auto" to null,
+                                "force ECO" to ThermalTier.ECO,
+                                "force PAUSE" to ThermalTier.PAUSE,
+                            ).forEach { (label, tier) ->
+                                DropdownMenuItem(
+                                    text = { Text((if (vm.debugTier == tier) "• " else "   ") + label) },
+                                    onClick = { vm.setDebugTier(tier); menuOpen = false },
+                                )
+                            }
+                        }
+                    }
+                },
             )
         },
     ) { pad ->
@@ -73,6 +99,20 @@ fun ChatScreen(vm: ChatViewModel) {
                 .padding(pad)
                 .imePadding()
         ) {
+            if (s.cooling) {
+                Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        "❄  Cooling down — generation paused (${s.thermal.reason})",
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
+            }
+
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
@@ -110,6 +150,20 @@ fun ChatScreen(vm: ChatViewModel) {
             }
         }
     }
+}
+
+private fun subtitle(s: ChatState): String {
+    val t = s.thermal
+    val parts = mutableListOf(s.modelName, s.statusLine)
+    val env = buildString {
+        append(t.statusName)
+        if (!t.headroom.isNaN()) append(" · hr %.2f".format(t.headroom))
+        if (!t.batteryC.isNaN()) append(" · %.0f°C".format(t.batteryC))
+    }
+    parts += env
+    if (s.effectiveTier != ThermalTier.NORMAL) parts += "▶ ${s.effectiveTier}"
+    else if (s.ecoMode) parts += "eco"
+    return parts.joinToString(" · ")
 }
 
 @Composable
