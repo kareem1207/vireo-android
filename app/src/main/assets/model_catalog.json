@@ -74,7 +74,7 @@
       "minRamMb": 1200,
       "contextMax": 2048,
       "license": "Gemma",
-      "notes": "On-device embedder for notebook RAG (used from M5)."
+      "notes": "On-device text embedder for notebook question-answering."
     }
   ]
 }
