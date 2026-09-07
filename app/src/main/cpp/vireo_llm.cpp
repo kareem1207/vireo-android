@@ -14,8 +14,10 @@
 #include <jni.h>
 #include <android/log.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -35,6 +37,7 @@ struct VireoLlm {
     const llama_vocab  *vocab = nullptr;
     std::string         chatTemplate;   // may be empty
     int                 nCtx  = 2048;
+    bool                embed = false;  // context created in embedding mode
     std::atomic<bool>   cancel{false};
 };
 
@@ -125,10 +128,11 @@ Java_com_vireo_llm_NativeLlm_nativePing(JNIEnv *env, jobject) {
 
 JNIEXPORT jlong JNICALL
 Java_com_vireo_llm_NativeLlm_nativeLoadModel(JNIEnv *env, jobject, jstring jpath,
-                                            jint nCtx, jint nThreads, jint nBatch) {
+                                            jint nCtx, jint nThreads, jint nBatch, jint embeddings) {
     ensureBackend();
+    const bool embed = embeddings != 0;
     const char *path = env->GetStringUTFChars(jpath, nullptr);
-    LOGI("loading model: %s (nCtx=%d nThreads=%d nBatch=%d)", path, nCtx, nThreads, nBatch);
+    LOGI("loading model: %s (nCtx=%d nThreads=%d nBatch=%d embed=%d)", path, nCtx, nThreads, nBatch, embed);
 
     llama_model_params mp = llama_model_default_params();
     mp.n_gpu_layers = 0;                        // CPU only
@@ -145,10 +149,13 @@ Java_com_vireo_llm_NativeLlm_nativeLoadModel(JNIEnv *env, jobject, jstring jpath
     llama_context_params cp = llama_context_default_params();
     cp.n_ctx           = (uint32_t) nCtx;
     cp.n_batch         = (uint32_t) nBatch;
+    cp.n_ubatch        = (uint32_t) nBatch;   // pooled embeddings need the whole seq in one ubatch
     cp.n_threads       = nThreads;
     cp.n_threads_batch = nThreads;
-    // KV cache left at default (f16) for the M1 baseline. Quantized KV (needs flash
-    // attention) is revisited in M3 alongside the thermal work.
+    if (embed) {
+        cp.embeddings   = true;
+        cp.pooling_type = LLAMA_POOLING_TYPE_MEAN;
+    }
 
     llama_context *ctx = llama_init_from_model(model, cp);
     if (!ctx) { LOGE("llama_init_from_model failed"); llama_model_free(model); return 0; }
@@ -158,10 +165,12 @@ Java_com_vireo_llm_NativeLlm_nativeLoadModel(JNIEnv *env, jobject, jstring jpath
     s->ctx   = ctx;
     s->vocab = llama_model_get_vocab(model);
     s->nCtx  = (int) llama_n_ctx(ctx);
+    s->embed = embed;
     const char *tmpl = llama_model_chat_template(model, nullptr);
     if (tmpl) s->chatTemplate = tmpl;
 
-    LOGI("model ready. n_ctx=%d chat_template=%s", s->nCtx, tmpl ? "builtin" : "(none)");
+    LOGI("model ready. n_ctx=%d n_embd=%d chat_template=%s",
+         s->nCtx, llama_model_n_embd(model), tmpl ? "builtin" : "(none)");
     return reinterpret_cast<jlong>(s);
 }
 
@@ -179,6 +188,46 @@ Java_com_vireo_llm_NativeLlm_nativeFree(JNIEnv *, jobject, jlong handle) {
     if (s->model) llama_model_free(s->model);
     delete s;
     LOGI("model freed");
+}
+
+JNIEXPORT jint JNICALL
+Java_com_vireo_llm_NativeLlm_nativeEmbedDim(JNIEnv *, jobject, jlong handle) {
+    auto *s = reinterpret_cast<VireoLlm *>(handle);
+    return (s && s->model) ? llama_model_n_embd(s->model) : 0;
+}
+
+/** Mean-pooled, L2-normalised sentence embedding for one text. Null on failure. */
+JNIEXPORT jfloatArray JNICALL
+Java_com_vireo_llm_NativeLlm_nativeEmbed(JNIEnv *env, jobject, jlong handle, jstring jtext) {
+    auto *s = reinterpret_cast<VireoLlm *>(handle);
+    if (!s || !s->embed) { LOGE("nativeEmbed: handle not in embedding mode"); return nullptr; }
+
+    const char *tc = env->GetStringUTFChars(jtext, nullptr);
+    std::string text(tc ? tc : "");
+    env->ReleaseStringUTFChars(jtext, tc);
+
+    std::vector<llama_token> tokens = tokenize(s->vocab, text, /*addSpecial=*/true, /*parseSpecial=*/false);
+    if (tokens.empty()) { LOGE("nativeEmbed: 0 tokens"); return nullptr; }
+    if ((int) tokens.size() > s->nCtx) tokens.resize(s->nCtx);   // must fit one ubatch
+
+    llama_memory_clear(llama_get_memory(s->ctx), true);
+    llama_batch batch = llama_batch_get_one(tokens.data(), (int32_t) tokens.size());
+    if (llama_decode(s->ctx, batch) != 0) { LOGE("nativeEmbed: decode failed"); return nullptr; }
+
+    const int n_embd = llama_model_n_embd(s->model);
+    const float *emb = llama_get_embeddings_seq(s->ctx, 0);
+    if (!emb) emb = llama_get_embeddings(s->ctx);
+    if (!emb) { LOGE("nativeEmbed: no embeddings out"); return nullptr; }
+
+    std::vector<float> v(emb, emb + n_embd);
+    double norm = 0.0;
+    for (float x : v) norm += (double) x * x;
+    norm = std::sqrt(norm);
+    if (norm > 0.0) for (float &x : v) x = (float) (x / norm);
+
+    jfloatArray out = env->NewFloatArray(n_embd);
+    env->SetFloatArrayRegion(out, 0, n_embd, v.data());
+    return out;
 }
 
 JNIEXPORT void JNICALL

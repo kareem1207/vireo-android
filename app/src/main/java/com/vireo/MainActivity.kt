@@ -27,12 +27,19 @@ import com.vireo.models.InstalledModels
 import com.vireo.models.ModelCatalog
 import com.vireo.models.ModelsScreen
 import com.vireo.models.ModelsViewModel
+import com.vireo.notebook.NotebookListScreen
+import com.vireo.notebook.NotebookScreen
+import com.vireo.notebook.NotebookViewModel
+import com.vireo.rag.Embedder
+import com.vireo.rag.Notebook
+import com.vireo.rag.NotebookRepository
 import com.vireo.thermal.ThermalGovernor
 import com.vireo.thermal.TelemetryLogger
 
 class MainActivity : ComponentActivity() {
 
     private val engine = LlmEngine()
+    private val embedder = Embedder()
     private var vmRef: ChatViewModel? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,9 +51,11 @@ class MainActivity : ComponentActivity() {
         val catalog = ModelCatalog.load(this)
         val installed = InstalledModels(this)
         val repo = ChatRepository(filesDir)
+        val notebookRepo = NotebookRepository(filesDir)
         val governor = ThermalGovernor(this)
         val telemetry = TelemetryLogger(filesDir)
         val prefs = getSharedPreferences("vireo", Context.MODE_PRIVATE)
+        val appCtx = applicationContext
 
         val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val totalRamMb = (ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.totalMem
@@ -74,28 +83,60 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 var screen by rememberSaveable { mutableStateOf("chat") }
+                var openNb by androidx.compose.runtime.remember { mutableStateOf<Notebook?>(null) }
+
                 val chatVm: ChatViewModel = viewModel(factory = chatFactory)
                 vmRef = chatVm
 
-                if (screen == "models") {
-                    val modelsFactory = object : ViewModelProvider.Factory {
-                        @Suppress("UNCHECKED_CAST")
-                        override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                            ModelsViewModel(
-                                catalog = catalog,
-                                installed = installed,
-                                totalRamMb = totalRamMb,
-                                filesDir = filesDir,
-                                onActivated = { _ ->
+                when (screen) {
+                    "models" -> {
+                        val f = object : ViewModelProvider.Factory {
+                            @Suppress("UNCHECKED_CAST")
+                            override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                                ModelsViewModel(catalog, installed, totalRamMb, filesDir) { _ ->
                                     installed.active(catalog)?.let { chatVm.switchModel(it) }
                                     screen = "chat"
-                                },
-                            ) as T
+                                } as T
+                        }
+                        ModelsScreen(viewModel(factory = f), onBack = { screen = "chat" })
                     }
-                    val modelsVm: ModelsViewModel = viewModel(factory = modelsFactory)
-                    ModelsScreen(modelsVm, onBack = { screen = "chat" })
-                } else {
-                    ChatScreen(chatVm, onOpenModels = { screen = "models" })
+
+                    "notebooklist" -> NotebookListScreen(
+                        repo = notebookRepo,
+                        onOpen = { openNb = it; screen = "notebook" },
+                        onBack = { screen = "chat" },
+                    )
+
+                    "notebook" -> {
+                        val nb = openNb
+                        if (nb == null) { screen = "notebooklist" }
+                        else {
+                            val f = object : ViewModelProvider.Factory {
+                                @Suppress("UNCHECKED_CAST")
+                                override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                                    NotebookViewModel(
+                                        appContext = appCtx,
+                                        repo = notebookRepo,
+                                        embedder = embedder,
+                                        chat = engine,
+                                        governor = governor,
+                                        nbId = nb.id,
+                                        nbName = nb.name,
+                                        embedModelPath = installed.embeddingPath(catalog),
+                                    ) as T
+                            }
+                            NotebookScreen(
+                                viewModel(key = "nb_${nb.id}", factory = f),
+                                onBack = { screen = "notebooklist" },
+                            )
+                        }
+                    }
+
+                    else -> ChatScreen(
+                        chatVm,
+                        onOpenModels = { screen = "models" },
+                        onOpenNotebooks = { screen = "notebooklist" },
+                    )
                 }
             }
         }

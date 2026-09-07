@@ -14,8 +14,12 @@ object NativeLlm {
 
     external fun nativePing(): String
 
-    /** @return opaque handle, or 0 on failure. */
-    external fun nativeLoadModel(path: String, nCtx: Int, nThreads: Int, nBatch: Int): Long
+    /** @return opaque handle, or 0 on failure. embeddings != 0 opens the context in embedding mode. */
+    external fun nativeLoadModel(path: String, nCtx: Int, nThreads: Int, nBatch: Int, embeddings: Int): Long
+
+    /** Mean-pooled, L2-normalised embedding for [text]; null on failure. Handle must be embedding-mode. */
+    external fun nativeEmbed(handle: Long, text: String): FloatArray?
+    external fun nativeEmbedDim(handle: Long): Int
 
     /** roles[i]/contents[i] form the chat transcript; native applies the model's template. */
     external fun nativeGenerate(

@@ -50,5 +50,10 @@ class InstalledModels(context: Context) {
         )
     }
 
+    /** Path to an installed embedding model, or null. */
+    fun embeddingPath(catalog: List<CatalogModel>): String? =
+        catalog.firstOrNull { it.role == "embedding" && isInstalled(it.id) }
+            ?.let { fileFor(it.id).absolutePath }
+
     companion object { private const val KEY_ACTIVE = "active" }
 }

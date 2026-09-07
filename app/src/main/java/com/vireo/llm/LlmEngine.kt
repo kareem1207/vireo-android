@@ -42,7 +42,7 @@ class LlmEngine {
         withContext(worker) {
             NativeLlm.ensureLoaded()
             if (handle != 0L) { NativeLlm.nativeFree(handle); handle = 0L; loadedPath = null }
-            val h = NativeLlm.nativeLoadModel(path, nCtx, nThreads, nBatch)
+            val h = NativeLlm.nativeLoadModel(path, nCtx, nThreads, nBatch, 0)
             check(h != 0L) { "nativeLoadModel failed for $path" }
             handle = h; loadedPath = path
             Log.i(TAG, "loaded $path")
