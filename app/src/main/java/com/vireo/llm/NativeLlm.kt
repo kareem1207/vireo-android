@@ -2,14 +2,12 @@ package com.vireo.llm
 
 /**
  * Thin JNI surface to llama.cpp (native lib: libvireo_llm.so).
- *
- * M1 step 1: [nativePing] only — proves the toolchain links and the ggml/llama
- * runtime initialises on-device. Model load / generate / embed follow next.
+ * All native calls are blocking; callers must run them off the main thread
+ * (see [LlmEngine]).
  */
 object NativeLlm {
 
-    @Volatile
-    private var loaded = false
+    @Volatile private var loaded = false
 
     fun ensureLoaded() {
         if (loaded) return
@@ -21,11 +19,32 @@ object NativeLlm {
         }
     }
 
-    /** Returns "llm-ok | <llama system info>" from native. */
     external fun nativePing(): String
 
-    fun ping(): String {
-        ensureLoaded()
-        return nativePing()
-    }
+    /** @return opaque handle, or 0 on failure. */
+    external fun nativeLoadModel(path: String, nCtx: Int, nThreads: Int, nBatch: Int): Long
+
+    external fun nativeGenerate(
+        handle: Long,
+        prompt: String,
+        maxTokens: Int,
+        temp: Float,
+        topP: Float,
+        topK: Int,
+        minP: Float,
+        seed: Int,
+        callback: GenerationCallback,
+    )
+
+    external fun nativeCancel(handle: Long)
+
+    external fun nativeFree(handle: Long)
+
+    fun ping(): String { ensureLoaded(); return nativePing() }
+}
+
+/** Native calls back into this per generated token and once at the end. */
+interface GenerationCallback {
+    fun onToken(piece: String)
+    fun onDone(tokPerSec: Float, nTokens: Int, promptEvalTokPerSec: Float)
 }

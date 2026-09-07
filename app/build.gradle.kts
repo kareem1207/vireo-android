@@ -18,7 +18,13 @@ android {
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild {
             cmake {
-                arguments += listOf("-DANDROID_STL=c++_static")
+                // Always optimize the native side, even for the debug APK — a Debug
+                // build of ggml/llama.cpp is 10-30x slower on-device.
+                arguments += listOf(
+                    "-DANDROID_STL=c++_static",
+                    "-DCMAKE_BUILD_TYPE=Release",
+                )
+                cppFlags += "-O3"
             }
         }
     }
@@ -65,6 +71,7 @@ dependencies {
     implementation(composeBom)
 
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.compose.ui:ui")

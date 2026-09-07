@@ -1,4 +1,10 @@
 cmake_minimum_required(VERSION 3.22.1)
+
+# AGP passes -DCMAKE_BUILD_TYPE=Debug for the debug APK, which builds ggml/llama.cpp
+# unoptimized with assertions on (10-30x slower on-device). Force Release for the
+# whole tree — we never want an unoptimized inference engine.
+set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
+
 project(vireo_llm CXX C)
 
 # --- llama.cpp build options (set before add_subdirectory) ---
