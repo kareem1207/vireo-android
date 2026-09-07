@@ -11,3 +11,7 @@ captures/
 .externalNativeBuild/
 .kotlin/
 vireo-release.jks
+
+# dev screenshots — only docs/images/ (curated) is tracked
+docs/*.png
+!docs/images/
