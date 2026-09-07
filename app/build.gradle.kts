@@ -7,6 +7,7 @@ plugins {
 android {
     namespace = "com.vireo"
     compileSdk = 35
+    ndkVersion = "27.1.12297006"
 
     defaultConfig {
         applicationId = "com.vireo"
@@ -15,6 +16,18 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         ndk { abiFilters += "arm64-v8a" }
+        externalNativeBuild {
+            cmake {
+                arguments += listOf("-DANDROID_STL=c++_static")
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     buildTypes {
