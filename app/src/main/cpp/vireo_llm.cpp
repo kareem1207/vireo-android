@@ -71,18 +71,22 @@ void flushUtf8(std::string &pending, std::string &out) {
     pending.erase(0, good);
 }
 
-std::string applyChatTemplate(VireoLlm *s, const std::string &userMsg) {
+std::string applyChatTemplate(VireoLlm *s, const std::vector<llama_chat_message> &msgs) {
     const char *tmpl = s->chatTemplate.empty() ? nullptr : s->chatTemplate.c_str();
-    llama_chat_message msg{"user", userMsg.c_str()};
-    std::vector<char> buf(userMsg.size() * 2 + 512);
-    int32_t n = llama_chat_apply_template(tmpl, &msg, 1, /*add_ass=*/true, buf.data(), (int32_t) buf.size());
+    size_t approx = 512;
+    for (auto &m : msgs) approx += strlen(m.role) + strlen(m.content) + 32;
+    std::vector<char> buf(approx * 2);
+    int32_t n = llama_chat_apply_template(tmpl, msgs.data(), msgs.size(), /*add_ass=*/true,
+                                          buf.data(), (int32_t) buf.size());
     if (n > (int32_t) buf.size()) {
         buf.resize(n);
-        n = llama_chat_apply_template(tmpl, &msg, 1, true, buf.data(), (int32_t) buf.size());
+        n = llama_chat_apply_template(tmpl, msgs.data(), msgs.size(), true, buf.data(), (int32_t) buf.size());
     }
     if (n <= 0) {
-        LOGW("chat template failed (n=%d); using raw prompt", n);
-        return userMsg;
+        LOGW("chat template failed (n=%d); concatenating raw", n);
+        std::string raw;
+        for (auto &m : msgs) { raw += m.role; raw += ": "; raw += m.content; raw += "\n"; }
+        return raw;
     }
     return std::string(buf.data(), n);
 }
@@ -177,7 +181,8 @@ Java_com_vireo_llm_NativeLlm_nativeFree(JNIEnv *, jobject, jlong handle) {
 }
 
 JNIEXPORT void JNICALL
-Java_com_vireo_llm_NativeLlm_nativeGenerate(JNIEnv *env, jobject, jlong handle, jstring jprompt,
+Java_com_vireo_llm_NativeLlm_nativeGenerate(JNIEnv *env, jobject, jlong handle,
+                                           jobjectArray jRoles, jobjectArray jContents,
                                            jint maxTokens, jfloat temp, jfloat topP, jint topK,
                                            jfloat minP, jint seed, jobject cb) {
     auto *s = reinterpret_cast<VireoLlm *>(handle);
@@ -188,14 +193,25 @@ Java_com_vireo_llm_NativeLlm_nativeGenerate(JNIEnv *env, jobject, jlong handle, 
     jmethodID mTok  = env->GetMethodID(cbCls, "onToken", "(Ljava/lang/String;)V");
     jmethodID mDone = env->GetMethodID(cbCls, "onDone", "(FIF)V");
 
-    const char *pc = env->GetStringUTFChars(jprompt, nullptr);
-    std::string userMsg(pc);
-    env->ReleaseStringUTFChars(jprompt, pc);
+    // marshal the message list
+    const jsize nMsg = env->GetArrayLength(jRoles);
+    std::vector<std::string> roleStr(nMsg), contentStr(nMsg);
+    std::vector<llama_chat_message> msgs(nMsg);
+    for (jsize i = 0; i < nMsg; ++i) {
+        auto r = (jstring) env->GetObjectArrayElement(jRoles, i);
+        auto c = (jstring) env->GetObjectArrayElement(jContents, i);
+        const char *rc = env->GetStringUTFChars(r, nullptr);
+        const char *cc = env->GetStringUTFChars(c, nullptr);
+        roleStr[i] = rc; contentStr[i] = cc;
+        env->ReleaseStringUTFChars(r, rc); env->ReleaseStringUTFChars(c, cc);
+        env->DeleteLocalRef(r); env->DeleteLocalRef(c);
+        msgs[i] = llama_chat_message{roleStr[i].c_str(), contentStr[i].c_str()};
+    }
 
-    // clear KV cache for a fresh single-turn generation (multi-turn reuse comes in M2)
+    // fresh KV each call: we re-send the (already trimmed) transcript every turn.
     llama_memory_clear(llama_get_memory(s->ctx), true);
 
-    const std::string prompt = applyChatTemplate(s, userMsg);
+    const std::string prompt = applyChatTemplate(s, msgs);
     std::vector<llama_token> tokens = tokenize(s->vocab, prompt, /*addSpecial=*/true, /*parseSpecial=*/true);
     if (tokens.empty()) { LOGE("tokenize produced 0 tokens"); return; }
     if ((int) tokens.size() >= s->nCtx - 4) {
