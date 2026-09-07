@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -64,7 +63,12 @@ fun NotebookScreen(vm: NotebookViewModel, onBack: () -> Unit) {
         },
     ) { pad ->
         Column(
-            Modifier.fillMaxSize().padding(pad).padding(12.dp).imePadding(),
+            Modifier
+                .fillMaxSize()
+                .padding(pad)
+                .padding(12.dp)
+                .imePadding()
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (s.embedModelMissing) {
@@ -124,7 +128,7 @@ fun NotebookScreen(vm: NotebookViewModel, onBack: () -> Unit) {
                 Card(Modifier.fillMaxWidth()) {
                     Text(
                         s.answer,
-                        Modifier.padding(12.dp).heightIn(max = 260.dp).verticalScroll(rememberScrollState()),
+                        Modifier.padding(12.dp),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }

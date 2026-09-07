@@ -34,4 +34,22 @@ class TelemetryLogger(filesDir: File) {
     }
 
     val path: String get() = file.absolutePath
+    fun readCsv(): String = runCatching { file.readText() }.getOrDefault("")
+
+    private val benchFile = File(file.parentFile, "bench.csv").also {
+        if (!it.exists()) runCatching { it.writeText("ts,model,gen_tok_s,prompt_tok_s,rounds,peak_battery_c,max_status\n") }
+    }
+
+    fun benchRow(model: String, genTokPerSec: Float, promptTokPerSec: Float, rounds: Int,
+                 peakBatteryC: Float, maxStatus: String) {
+        runCatching {
+            benchFile.appendText(
+                "${System.currentTimeMillis()},$model,${"%.2f".format(genTokPerSec)}," +
+                    "${"%.2f".format(promptTokPerSec)},$rounds," +
+                    "${if (peakBatteryC.isNaN()) "" else "%.1f".format(peakBatteryC)},$maxStatus\n"
+            )
+        }
+    }
+
+    fun benchCsv(): String = runCatching { benchFile.readText() }.getOrDefault("")
 }

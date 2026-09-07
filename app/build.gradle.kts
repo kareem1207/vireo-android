@@ -36,16 +36,28 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = rootProject.file("vireo-release.jks")
+            storePassword = System.getenv("VIREO_KS_PASS") ?: "vireo123456"
+            keyAlias = "vireo"
+            keyPassword = System.getenv("VIREO_KEY_PASS") ?: "vireo123456"
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            ndk { debugSymbolLevel = "none" }
         }
     }
 

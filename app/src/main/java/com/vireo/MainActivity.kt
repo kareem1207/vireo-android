@@ -20,6 +20,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.vireo.chat.ChatRepository
 import com.vireo.chat.ChatScreen
 import com.vireo.chat.ChatViewModel
+import com.vireo.diag.DiagnosticsScreen
 import com.vireo.llm.LlmEngine
 import com.vireo.llm.NativeLlm
 import com.vireo.models.DownloadController
@@ -107,6 +108,16 @@ class MainActivity : ComponentActivity() {
                         onBack = { screen = "chat" },
                     )
 
+                    "diag" -> DiagnosticsScreen(
+                        engine = engine,
+                        embedder = embedder,
+                        governor = governor,
+                        telemetry = telemetry,
+                        activeModelLabel = installed.active(catalog)?.label ?: "(none)",
+                        installedIds = installed.installedIds(),
+                        onBack = { screen = "chat" },
+                    )
+
                     "notebook" -> {
                         val nb = openNb
                         if (nb == null) { screen = "notebooklist" }
@@ -136,6 +147,7 @@ class MainActivity : ComponentActivity() {
                         chatVm,
                         onOpenModels = { screen = "models" },
                         onOpenNotebooks = { screen = "notebooklist" },
+                        onOpenDiagnostics = { screen = "diag" },
                     )
                 }
             }

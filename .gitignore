@@ -10,3 +10,4 @@ app/.cxx/
 captures/
 .externalNativeBuild/
 .kotlin/
+vireo-release.jks
