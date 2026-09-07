@@ -132,9 +132,10 @@ Java_com_vireo_llm_NativeLlm_nativeLoadModel(JNIEnv *env, jobject, jstring jpath
 
     llama_model_params mp = llama_model_default_params();
     mp.n_gpu_layers = 0;                        // CPU only
-    // NOTE: mmap over Android FUSE (/sdcard, getExternalFilesDir) stalls indefinitely.
-    // Read the whole file instead. The model manager (M4) downloads to internal
-    // storage where mmap is safe and can re-enable it.
+    // mmap hangs indefinitely on this ColorOS/Android 15 build for BOTH FUSE
+    // /sdcard and internal storage (tested M1 and M4). Read the whole file.
+    // Consequence: 3B (~1.9 GB) full-read is tight against the RAM budget — the
+    // catalog flags it and the Models screen shows a RAM warning.
     mp.load_mode    = LLAMA_LOAD_MODE_NONE;
 
     llama_model *model = llama_model_load_from_file(path, mp);
@@ -214,15 +215,27 @@ Java_com_vireo_llm_NativeLlm_nativeGenerate(JNIEnv *env, jobject, jlong handle,
     const std::string prompt = applyChatTemplate(s, msgs);
     std::vector<llama_token> tokens = tokenize(s->vocab, prompt, /*addSpecial=*/true, /*parseSpecial=*/true);
     if (tokens.empty()) { LOGE("tokenize produced 0 tokens"); return; }
-    if ((int) tokens.size() >= s->nCtx - 4) {
-        tokens.resize(s->nCtx - 64);   // crude guard for M1
+    if ((int) tokens.size() > s->nCtx - 64) {
+        // keep the tail so the newest turn survives; leave room for the reply
+        tokens.erase(tokens.begin(), tokens.end() - (s->nCtx - 64));
+        LOGW("prompt truncated to %zu tokens (n_ctx=%d)", tokens.size(), s->nCtx);
     }
 
     using clock = std::chrono::steady_clock;
     auto t0 = clock::now();
 
-    llama_batch batch = llama_batch_get_one(tokens.data(), (int32_t) tokens.size());
-    if (llama_decode(s->ctx, batch) != 0) { LOGE("llama_decode(prompt) failed"); return; }
+    // Decode the prompt in n_batch-sized chunks. A single llama_decode() with
+    // n_tokens > n_batch trips a GGML_ASSERT (ggml_abort -> SIGABRT).
+    const int32_t nBatch = (int32_t) llama_n_batch(s->ctx);
+    for (size_t off = 0; off < tokens.size(); off += (size_t) nBatch) {
+        const int32_t n = (int32_t) std::min<size_t>(nBatch, tokens.size() - off);
+        llama_batch batch = llama_batch_get_one(tokens.data() + off, n);
+        if (llama_decode(s->ctx, batch) != 0) {
+            LOGE("llama_decode(prompt chunk @%zu) failed", off);
+            env->CallVoidMethod(cb, mDone, 0.0f, 0, 0.0f);   // close the flow, don't hang
+            return;
+        }
+    }
 
     auto tPrompt = clock::now();
     float promptTps = tokens.size() /

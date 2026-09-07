@@ -43,7 +43,7 @@ import com.vireo.thermal.ThermalTier
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(vm: ChatViewModel) {
+fun ChatScreen(vm: ChatViewModel, onOpenModels: () -> Unit) {
     val s by vm.state.collectAsState()
     var input by remember { mutableStateOf("") }
     var menuOpen by remember { mutableStateOf(false) }
@@ -67,6 +67,11 @@ fun ChatScreen(vm: ChatViewModel) {
                     Box {
                         TextButton(onClick = { menuOpen = true }) { Text("⋮") }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Models…") },
+                                onClick = { menuOpen = false; onOpenModels() },
+                            )
+                            HorizontalDivider()
                             DropdownMenuItem(
                                 text = { Text(if (s.ecoMode) "Eco Mode: ON" else "Eco Mode: OFF") },
                                 onClick = { vm.setEcoMode(!s.ecoMode) },

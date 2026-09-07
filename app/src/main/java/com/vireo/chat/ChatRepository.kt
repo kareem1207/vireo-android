@@ -13,7 +13,7 @@ class ChatRepository(filesDir: File) {
     fun load(): List<UiMessage> = runCatching {
         if (!file.exists()) return emptyList()
         val arr = JSONArray(file.readText())
-        buildList {
+        val out = buildList {
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
                 add(
@@ -25,6 +25,8 @@ class ChatRepository(filesDir: File) {
                 )
             }
         }
+        // a crash / kill mid-reply can leave a trailing user turn with no answer
+        if (out.lastOrNull()?.role == "user") out.dropLast(1) else out
     }.getOrElse {
         Log.w("Vireo", "chat history load failed", it); emptyList()
     }

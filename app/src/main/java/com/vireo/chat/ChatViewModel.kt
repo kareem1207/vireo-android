@@ -6,6 +6,7 @@ import com.vireo.llm.ChatMsg
 import com.vireo.llm.GenEvent
 import com.vireo.llm.GenParams
 import com.vireo.llm.LlmEngine
+import com.vireo.models.ActiveModel
 import com.vireo.thermal.ThermalGovernor
 import com.vireo.thermal.ThermalPacer
 import com.vireo.thermal.ThermalSnapshot
@@ -51,14 +52,17 @@ class ChatViewModel(
     private val repo: ChatRepository,
     private val governor: ThermalGovernor,
     private val telemetry: TelemetryLogger,
-    private val modelPath: String?,
-    private val modelLabel: String,
+    initialActive: ActiveModel?,
     initialEcoMode: Boolean = false,
     private val persistEcoMode: (Boolean) -> Unit = {},
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
-        ChatState(messages = repo.load(), modelName = modelLabel, ecoMode = initialEcoMode)
+        ChatState(
+            messages = repo.load(),
+            modelName = initialActive?.label ?: "(no model)",
+            ecoMode = initialEcoMode,
+        )
     )
     val state: StateFlow<ChatState> = _state.asStateFlow()
 
@@ -79,16 +83,28 @@ class ChatViewModel(
         viewModelScope.launch { governor.snapshot.collect { _state.value = _state.value.copy(thermal = it) } }
         viewModelScope.launch { effectiveTier.collect { _state.value = _state.value.copy(effectiveTier = it) } }
 
-        if (modelPath == null) {
-            _state.value = _state.value.copy(statusLine = "no .gguf in models folder")
+        if (initialActive == null) {
+            _state.value = _state.value.copy(statusLine = "no model — open Models to download one")
         } else {
-            viewModelScope.launch {
-                _state.value = _state.value.copy(statusLine = "loading model…")
-                runCatching { engine.load(modelPath, nCtx = 2048, nThreads = THREADS, nBatch = 128) }
-                    .onSuccess { _state.value = _state.value.copy(modelReady = true, statusLine = "ready") }
-                    .onFailure { _state.value = _state.value.copy(statusLine = "load failed: ${it.message}") }
-            }
+            loadModel(initialActive)
         }
+    }
+
+    private fun loadModel(active: ActiveModel) {
+        _state.value = _state.value.copy(
+            modelReady = false, modelName = active.label, statusLine = "loading ${active.label}…",
+        )
+        viewModelScope.launch {
+            runCatching { engine.load(active.path, nCtx = 2048, nThreads = THREADS, nBatch = 512) }
+                .onSuccess { _state.value = _state.value.copy(modelReady = true, statusLine = "ready") }
+                .onFailure { _state.value = _state.value.copy(statusLine = "load failed: ${it.message}") }
+        }
+    }
+
+    /** Called when the user activates a different model in the Models screen. */
+    fun switchModel(active: ActiveModel) {
+        if (_state.value.busy) stop()
+        loadModel(active)
     }
 
     fun send(text: String) {
