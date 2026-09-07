@@ -9,3 +9,4 @@ app/.cxx/
 .DS_Store
 captures/
 .externalNativeBuild/
+.kotlin/
