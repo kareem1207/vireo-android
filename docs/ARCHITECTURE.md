@@ -123,7 +123,7 @@ sequenceDiagram
             PACE-->>NAT: return true immediately
         end
         NAT-->>ENG: emit GenEvent.Token
-        ENG-->>VM: Flow<GenEvent>
+        ENG-->>VM: Flow of GenEvent
         VM-->>CS: state.messages updated (Compose recomposes)
     end
     NAT->>VM: onDone(tok/s)
@@ -155,7 +155,7 @@ sequenceDiagram
         EM-->>NV: float[768]  (L2-normalised)
         NV->>VS: add(Chunk, vector)
     end
-    NV->>VS: persist  (<id>.chunks.json + <id>.vecs.bin)
+    NV->>VS: persist  (chunks.json + vecs.bin)
     end
 
     rect rgb(245,255,245)
@@ -191,15 +191,15 @@ sequenceDiagram
     MS->>MV: download(catalogModel)
     MV->>DC: start(model)
     DC->>DL: download(model, dest)
-    DL->>DL: GET url (Range: bytes=<part size>- if resuming)
+    DL->>DL: GET url (Range header when resuming)
     loop stream
-        DL->>FS: append to <id>.gguf.part
+        DL->>FS: append to id.gguf.part
         DL-->>DC: Progress(bytes, total, B/s)
         DC-->>MS: LinearProgressIndicator + "MB / MB · MB/s"
     end
     DL->>DL: SHA-256(part) == catalog.sha256 ?
     alt match
-        DL->>FS: rename .part -> <id>.gguf
+        DL->>FS: rename .part to id.gguf
         DL-->>MS: Installed  (Activate / Delete)
     else mismatch
         DL->>FS: delete .part

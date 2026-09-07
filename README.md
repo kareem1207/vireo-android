@@ -70,7 +70,7 @@ flowchart TD
     GOV -. per-token pacing .-> NL
     NL --> CHAT
     NL --> EMB
-    DL -->|"<id>.gguf + SHA-256"| Store[(internal storage)]
+    DL -->|"gguf + SHA-256"| Store[(internal storage)]
     CHAT -. reads .- Store
     EMB  -. reads .- Store
 ```
