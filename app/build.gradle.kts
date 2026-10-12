@@ -36,12 +36,18 @@ android {
         }
     }
 
+    // Release signing secrets come from keystore.properties (git-ignored) or environment variables.
+    val keystoreProps = java.util.Properties().apply {
+        rootProject.file("keystore.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+    }
+    fun signing(prop: String, env: String): String? = keystoreProps.getProperty(prop) ?: System.getenv(env)
+
     signingConfigs {
         create("release") {
             storeFile = rootProject.file("vireo-release.jks")
-            storePassword = System.getenv("VIREO_KS_PASS") ?: "vireo123456"
+            storePassword = signing("storePassword", "VIREO_KS_PASS")
             keyAlias = "vireo"
-            keyPassword = System.getenv("VIREO_KEY_PASS") ?: "vireo123456"
+            keyPassword = signing("keyPassword", "VIREO_KEY_PASS")
         }
     }
 
